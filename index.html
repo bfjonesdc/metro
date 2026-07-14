@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#141311">
+<title>Next Arrivals · DC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75,400;75,600;75,700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#141311;          /* dark granite, like a station pylon */
+    --board:#1d1b17;       /* PIDS board housing */
+    --board-edge:#2b2823;
+    --amber:#ffb000;       /* dot-matrix amber */
+    --amber-dim:#7a5a10;
+    --paper:#efece6;
+    --muted:#8f8a80;
+    --rd:#BF0D3E; --or:#ED8B00; --yl:#FFD100; --gr:#00B140; --bl:#009CDE; --sv:#919D9D;
+    --bus:#d13239;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--paper);
+    font-family:'Archivo',system-ui,sans-serif;
+    font-stretch:75%;
+    padding:max(env(safe-area-inset-top),14px) 14px calc(env(safe-area-inset-bottom) + 20px);
+    max-width:520px;margin:0 auto;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- pylon header ---- */
+  header{
+    display:flex;align-items:center;justify-content:space-between;
+    border-bottom:3px solid var(--paper);
+    padding:6px 2px 10px;margin-bottom:16px;
+  }
+  header h1{
+    font-size:1.05rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  }
+  header .dot{display:inline-block;width:.55em;height:.55em;border-radius:50%;background:var(--amber);margin-right:.45em;vertical-align:6%}
+  .hbtns{display:flex;gap:8px}
+  .hbtn{
+    background:none;border:1px solid var(--muted);color:var(--paper);
+    font-family:inherit;font-stretch:75%;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+    padding:6px 10px;border-radius:3px;cursor:pointer;
+  }
+  .hbtn:active{background:var(--board-edge)}
+  .hbtn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+  .status{font-size:.72rem;color:var(--muted);letter-spacing:.06em;margin-bottom:14px;min-height:1em}
+
+  /* ---- arrival boards ---- */
+  .board{
+    background:var(--board);
+    border:1px solid var(--board-edge);
+    border-radius:6px;
+    padding:0 0 6px;
+    margin-bottom:18px;
+    box-shadow:0 2px 0 #000, inset 0 1px 0 #33302a;
+  }
+  .board-head{
+    display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    padding:12px 14px 8px;
+    border-bottom:1px solid var(--board-edge);
+  }
+  .board-head .name{font-weight:700;font-size:.95rem;letter-spacing:.05em;text-transform:uppercase}
+  .board-head .walk{font-size:.72rem;color:var(--muted);white-space:nowrap}
+
+  .rows{padding:4px 8px}
+  .row{
+    display:grid;grid-template-columns:34px 1fr 76px;align-items:center;gap:10px;
+    padding:7px 6px;
+    border-bottom:1px dotted #2e2b25;
+  }
+  .row:last-child{border-bottom:none}
+
+  .bullet{
+    width:30px;height:30px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:.72rem;color:#fff;letter-spacing:.02em;
+  }
+  .bullet.yl,.bullet.sv{color:#141311}
+  .bullet.bus{border-radius:5px;background:var(--bus);font-size:.68rem}
+
+  .dest{font-size:.9rem;line-height:1.25;letter-spacing:.02em;overflow:hidden}
+  .dest small{display:block;color:var(--muted);font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;margin-top:1px}
+
+  .min{
+    font-family:'VT323',monospace;
+    font-size:2rem;line-height:1;
+    color:var(--amber);
+    text-align:right;
+    text-shadow:0 0 6px rgba(255,176,0,.45);
+    font-variant-numeric:tabular-nums;
+  }
+  .min small{font-size:1.05rem;color:var(--amber-dim);margin-left:3px;text-shadow:none}
+  .min.now{animation:blink 1.2s steps(2,start) infinite}
+  @media (prefers-reduced-motion:reduce){.min.now{animation:none}}
+  @keyframes blink{50%{opacity:.35}}
+
+  .empty{padding:16px 14px;color:var(--muted);font-size:.82rem;letter-spacing:.03em}
+
+  /* ---- setup / errors ---- */
+  .panel{background:var(--board);border:1px solid var(--board-edge);border-radius:6px;padding:18px 16px;margin-bottom:18px}
+  .panel h2{font-size:.9rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px}
+  .panel p{font-size:.85rem;line-height:1.5;color:#c9c4ba;margin-bottom:12px}
+  .panel a{color:var(--amber)}
+  .panel input{
+    width:100%;background:#0e0d0b;border:1px solid var(--board-edge);border-radius:4px;
+    color:var(--amber);font-family:'VT323',monospace;font-size:1.15rem;
+    padding:10px 12px;margin-bottom:12px;letter-spacing:.05em;
+  }
+  .panel input:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+  .go{
+    width:100%;background:var(--amber);color:#141311;border:none;border-radius:4px;
+    font-family:inherit;font-stretch:75%;font-weight:700;font-size:.85rem;letter-spacing:.12em;text-transform:uppercase;
+    padding:12px;cursor:pointer;
+  }
+  .go:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+  .err{color:#ff7a6e}
+  .hidden{display:none}
+
+  footer{font-size:.66rem;color:#5c5850;letter-spacing:.05em;text-align:center;margin-top:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="dot" aria-hidden="true"></span>Next Arrivals</h1>
+  <div class="hbtns">
+    <button class="hbtn" id="refreshBtn" aria-label="Refresh arrivals">Refresh</button>
+    <button class="hbtn" id="keyBtn" aria-label="API key settings">Key</button>
+  </div>
+</header>
+
+<div class="status" id="status" role="status"></div>
+
+<!-- API key setup -->
+<div class="panel hidden" id="setup">
+  <h2>One-time setup</h2>
+  <p>This board pulls live predictions straight from WMATA. Get a free API key at
+  <a href="https://developer.wmata.com" target="_blank" rel="noopener">developer.wmata.com</a>
+  (sign up → Products → Default Tier → subscribe), then paste it here. It's stored on this device only.</p>
+  <input id="keyInput" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="WMATA API key">
+  <button class="go" id="saveKey">Save and show arrivals</button>
+</div>
+
+<!-- error panel -->
+<div class="panel hidden" id="errPanel">
+  <h2 class="err">Signal problem</h2>
+  <p id="errMsg"></p>
+  <button class="go" id="retryBtn">Try again</button>
+</div>
+
+<!-- boards -->
+<section class="board hidden" id="railBoard" aria-label="Metro arrivals">
+  <div class="board-head">
+    <div class="name" id="railName">—</div>
+    <div class="walk" id="railWalk"></div>
+  </div>
+  <div class="rows" id="railRows"></div>
+</section>
+
+<section class="board hidden" id="busBoard" aria-label="Bus arrivals">
+  <div class="board-head">
+    <div class="name" id="busName">—</div>
+    <div class="walk" id="busWalk"></div>
+  </div>
+  <div class="rows" id="busRows"></div>
+</section>
+
+<footer>Live data · WMATA API · auto-refreshes every 30 s</footer>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const API = 'https://api.wmata.com';
+  const LINE_NAMES = {RD:'Red', OR:'Orange', YL:'Yellow', GR:'Green', BL:'Blue', SV:'Silver'};
+  let apiKey = '';           // you can also hardcode your key here: let apiKey = 'xxxx';
+  let pos = null;
+  let timer = null;
+
+  /* ---------- key persistence (Claude artifact storage, with fallback) ---------- */
+  async function loadKey(){
+    if (apiKey) return apiKey;
+    if (window.storage){
+      try{ const r = await window.storage.get('wmata-key'); if(r && r.value){ apiKey = r.value; } }catch(e){}
+    }
+    return apiKey;
+  }
+  async function saveKey(k){
+    apiKey = k;
+    if (window.storage){
+      try{ await window.storage.set('wmata-key', k); }catch(e){}
+    }
+  }
+
+  /* ---------- helpers ---------- */
+  function haversine(lat1,lon1,lat2,lon2){
+    const R=6371000, toR=Math.PI/180;
+    const dLat=(lat2-lat1)*toR, dLon=(lon2-lon1)*toR;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+  function walkLabel(m){
+    const min=Math.max(1,Math.round(m/80)); // ~80 m per minute
+    return Math.round(m)+' m · ~'+min+' min walk';
+  }
+  function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+  function setStatus(msg){ $('status').textContent = msg; }
+
+  async function wmata(path, params){
+    const url = new URL(API+path);
+    Object.entries(params||{}).forEach(([k,v])=>url.searchParams.set(k,v));
+    url.searchParams.set('api_key', apiKey);
+    const res = await fetch(url.toString());
+    if(res.status===401||res.status===403) throw new Error('WMATA rejected the API key. Tap "Key" and re-enter it.');
+    if(res.status===429) throw new Error('Rate limit hit. Wait a few seconds and try again.');
+    if(!res.ok) throw new Error('WMATA API error ('+res.status+').');
+    return res.json();
+  }
+
+  function getPosition(){
+    return new Promise((resolve,reject)=>{
+      if(!navigator.geolocation) return reject(new Error('This browser has no location support.'));
+      navigator.geolocation.getCurrentPosition(
+        p=>resolve({lat:p.coords.latitude, lon:p.coords.longitude}),
+        e=>reject(new Error(e.code===1
+          ? 'Location access was denied. Allow location for this page, then try again.'
+          : 'Could not get your location. Try again.')),
+        {enableHighAccuracy:true, timeout:12000, maximumAge:60000}
+      );
+    });
+  }
+
+  /* ---------- rendering ---------- */
+  function minCell(v){
+    const raw=String(v==null?'':v).trim();
+    if(raw==='' ) return '<div class="min"><small>—</small></div>';
+    if(/^\d+$/.test(raw)){
+      const n=+raw;
+      if(n===0) return '<div class="min now">ARR</div>';
+      return '<div class="min">'+n+'<small>min</small></div>';
+    }
+    const now = raw==='BRD'||raw==='ARR';
+    return '<div class="min'+(now?' now':'')+'">'+esc(raw)+'</div>';
+  }
+
+  function renderRail(name, walkM, trains){
+    $('railName').textContent = name;
+    $('railWalk').textContent = walkLabel(walkM);
+    const rows = $('railRows');
+    if(!trains.length){
+      rows.innerHTML = '<div class="empty">No trains currently predicted at this station.</div>';
+    } else {
+      rows.innerHTML = trains.slice(0,6).map(t=>{
+        const line=(t.Line||'--').toUpperCase();
+        const cls=line.toLowerCase();
+        const known=LINE_NAMES[line]?'':'style="background:#555"';
+        return '<div class="row">'
+          + '<div class="bullet '+cls+'" '+known+' style="background:var(--'+cls+',#555)">'+esc(line)+'</div>'
+          + '<div class="dest">'+esc(t.DestinationName||t.Destination||'—')
+          +   '<small>'+esc(LINE_NAMES[line]||'')+' line'+(t.Car?' · '+esc(t.Car)+' cars':'')+'</small></div>'
+          + minCell(t.Min)
+          + '</div>';
+      }).join('');
+    }
+    $('railBoard').classList.remove('hidden');
+  }
+
+  function renderBus(name, walkM, preds){
+    $('busName').textContent = name;
+    $('busWalk').textContent = walkLabel(walkM);
+    const rows = $('busRows');
+    if(!preds.length){
+      rows.innerHTML = '<div class="empty">No buses currently predicted at this stop.</div>';
+    } else {
+      rows.innerHTML = preds.slice(0,5).map(p=>{
+        return '<div class="row">'
+          + '<div class="bullet bus">'+esc(p.RouteID||'?')+'</div>'
+          + '<div class="dest">'+esc(p.DirectionText||'—')+'<small>Metrobus</small></div>'
+          + minCell(p.Minutes)
+          + '</div>';
+      }).join('');
+    }
+    $('busBoard').classList.remove('hidden');
+  }
+
+  /* ---------- data flow ---------- */
+  async function nearestRail(){
+    const d = await wmata('/Rail.svc/json/jStationEntrances', {Lat:pos.lat, Lon:pos.lon, Radius:2500});
+    const ents = (d.Entrances||[]).filter(e=>e.StationCode1);
+    if(!ents.length) return null;
+    ents.forEach(e=>e._d = haversine(pos.lat,pos.lon,e.Lat,e.Lon));
+    ents.sort((a,b)=>a._d-b._d);
+    const e = ents[0];
+    const codes = [e.StationCode1, e.StationCode2].filter(Boolean).join(',');
+    const p = await wmata('/StationPrediction.svc/json/GetPrediction/'+codes, {});
+    const trains = (p.Trains||[]).filter(t=>t.Line && t.Line!=='--' && t.Line!=='No');
+    // Prefer the station name from predictions; fall back to entrance name
+    const name = (trains[0] && trains[0].LocationName) || (e.Name||'Metro station').replace(/ELEVATOR|ENTRANCE.*$/i,'').trim();
+    return {name, dist:e._d, trains};
+  }
+
+  async function nearestBus(){
+    const d = await wmata('/Bus.svc/json/jStops', {Lat:pos.lat, Lon:pos.lon, Radius:800});
+    const stops = d.Stops||[];
+    if(!stops.length) return null;
+    stops.forEach(s=>s._d = haversine(pos.lat,pos.lon,s.Lat,s.Lon));
+    stops.sort((a,b)=>a._d-b._d);
+    // Closest stop can be quiet; check up to the 3 nearest for live predictions
+    for(let i=0;i<Math.min(3,stops.length);i++){
+      const s=stops[i];
+      if(!s.StopID || s.StopID==='0') continue;
+      const p = await wmata('/NextBusService.svc/json/jPredictions', {StopID:s.StopID});
+      const preds = p.Predictions||[];
+      if(preds.length || i===Math.min(3,stops.length)-1){
+        return {name: p.StopName||s.Name||'Bus stop', dist:s._d, preds};
+      }
+    }
+    const s=stops[0];
+    return {name:s.Name||'Bus stop', dist:s._d, preds:[]};
+  }
+
+  async function refresh(){
+    if(!apiKey){ showSetup(); return; }
+    $('errPanel').classList.add('hidden');
+    try{
+      if(!pos){ setStatus('Finding you…'); pos = await getPosition(); }
+      setStatus('Loading arrivals…');
+      const [rail, bus] = await Promise.all([nearestRail(), nearestBus()]);
+      if(rail) renderRail(rail.name, rail.dist, rail.trains);
+      else { $('railName').textContent='No station within 2.5 km'; $('railRows').innerHTML=''; $('railWalk').textContent=''; $('railBoard').classList.remove('hidden'); }
+      if(bus) renderBus(bus.name, bus.dist, bus.preds);
+      else { $('busName').textContent='No bus stop within 800 m'; $('busRows').innerHTML=''; $('busWalk').textContent=''; $('busBoard').classList.remove('hidden'); }
+      setStatus('Updated '+new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}));
+      clearTimeout(timer); timer=setTimeout(refresh, 30000);
+    }catch(err){
+      showError(err.message||String(err));
+    }
+  }
+
+  function showError(msg){
+    setStatus('');
+    $('errMsg').textContent = msg;
+    $('errPanel').classList.remove('hidden');
+    clearTimeout(timer);
+  }
+  function showSetup(){
+    setStatus('');
+    $('setup').classList.remove('hidden');
+    $('railBoard').classList.add('hidden');
+    $('busBoard').classList.add('hidden');
+    $('keyInput').focus();
+  }
+
+  /* ---------- events ---------- */
+  $('saveKey').addEventListener('click', async ()=>{
+    const k=$('keyInput').value.trim();
+    if(!k) return;
+    await saveKey(k);
+    $('setup').classList.add('hidden');
+    refresh();
+  });
+  $('keyInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('saveKey').click(); });
+  $('refreshBtn').addEventListener('click', ()=>{ pos=null; refresh(); });
+  $('keyBtn').addEventListener('click', showSetup);
+  $('retryBtn').addEventListener('click', ()=>{ pos=null; refresh(); });
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && apiKey) refresh(); });
+
+  /* ---------- boot ---------- */
+  (async ()=>{
+    await loadKey();
+    if(apiKey) refresh(); else showSetup();
+  })();
+})();
+</script>
+</body>
+</html>
