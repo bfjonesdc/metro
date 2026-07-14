@@ -117,6 +117,12 @@
     padding:10px 12px;margin-bottom:12px;letter-spacing:.05em;
   }
   .panel input:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+  .panel select{
+    width:100%;background:#0e0d0b;border:1px solid var(--board-edge);border-radius:4px;
+    color:var(--amber);font-family:'VT323',monospace;font-size:1.15rem;
+    padding:10px 12px;margin-bottom:12px;letter-spacing:.05em;
+  }
+  .panel select:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
   .go{
     width:100%;background:var(--amber);color:#141311;border:none;border-radius:4px;
     font-family:inherit;font-stretch:75%;font-weight:700;font-size:.85rem;letter-spacing:.12em;text-transform:uppercase;
@@ -135,6 +141,7 @@
   <h1><span class="dot" aria-hidden="true"></span>Next Arrivals</h1>
   <div class="hbtns">
     <button class="hbtn" id="refreshBtn" aria-label="Refresh arrivals">Refresh</button>
+    <button class="hbtn" id="stationBtn" aria-label="Choose Metro station">Station</button>
     <button class="hbtn" id="keyBtn" aria-label="API key settings">Key</button>
   </div>
 </header>
@@ -149,6 +156,14 @@
   (sign up → Products → Default Tier → subscribe), then paste it here. It's stored on this device only.</p>
   <input id="keyInput" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="WMATA API key">
   <button class="go" id="saveKey">Save and show arrivals</button>
+</div>
+
+<!-- station override -->
+<div class="panel hidden" id="stationPanel">
+  <h2>Metro station</h2>
+  <p>By default the nearest station is picked by straight-line distance, which isn't always the most walkable one. Pin a specific station here to always use it instead.</p>
+  <select id="stationSelect"><option value="">Auto-detect nearest</option></select>
+  <button class="go" id="saveStation">Save</button>
 </div>
 
 <!-- error panel -->
@@ -185,6 +200,8 @@
   let apiKey = '';           // you can also hardcode your key here: let apiKey = 'xxxx';
   let pos = null;
   let timer = null;
+  let pinnedStation = null;  // {Code, Name, Lat, Lon, together}
+  let allStations = null;    // cached jStations list, fetched on demand
 
   /* ---------- key persistence (Claude artifact storage, with fallback) ---------- */
   async function loadKey(){
@@ -198,6 +215,20 @@
     apiKey = k;
     if (window.storage){
       try{ await window.storage.set('wmata-key', k); }catch(e){}
+    }
+  }
+
+  /* ---------- pinned-station persistence ---------- */
+  async function loadPinnedStation(){
+    if (window.storage){
+      try{ const r = await window.storage.get('wmata-station'); if(r && r.value){ pinnedStation = JSON.parse(r.value); } }catch(e){}
+    }
+    return pinnedStation;
+  }
+  async function savePinnedStation(station){
+    pinnedStation = station;
+    if (window.storage){
+      try{ await window.storage.set('wmata-station', station ? JSON.stringify(station) : ''); }catch(e){}
     }
   }
 
@@ -293,7 +324,26 @@
   }
 
   /* ---------- data flow ---------- */
+  async function fetchStations(){
+    if (allStations) return allStations;
+    const d = await wmata('/Rail.svc/json/jStations', {});
+    const seen = new Set();
+    allStations = (d.Stations||[]).filter(s=>{
+      if (seen.has(s.Name)) return false;
+      seen.add(s.Name);
+      return true;
+    }).sort((a,b)=>a.Name.localeCompare(b.Name));
+    return allStations;
+  }
+
   async function nearestRail(){
+    if (pinnedStation){
+      const codes = [pinnedStation.Code, pinnedStation.together].filter(Boolean).join(',');
+      const p = await wmata('/StationPrediction.svc/json/GetPrediction/'+codes, {});
+      const trains = (p.Trains||[]).filter(t=>t.Line && t.Line!=='--' && t.Line!=='No');
+      const dist = pos ? haversine(pos.lat,pos.lon,pinnedStation.Lat,pinnedStation.Lon) : 0;
+      return {name: pinnedStation.Name, dist, trains};
+    }
     const d = await wmata('/Rail.svc/json/jStationEntrances', {Lat:pos.lat, Lon:pos.lon, Radius:2500});
     const ents = (d.Entrances||[]).filter(e=>e.StationCode1);
     if(!ents.length) return null;
@@ -331,6 +381,7 @@
   async function refresh(){
     if(!apiKey){ showSetup(); return; }
     $('errPanel').classList.add('hidden');
+    $('stationPanel').classList.add('hidden');
     try{
       if(!pos){ setStatus('Finding you…'); pos = await getPosition(); }
       setStatus('Loading arrivals…');
@@ -354,10 +405,30 @@
   }
   function showSetup(){
     setStatus('');
+    $('stationPanel').classList.add('hidden');
     $('setup').classList.remove('hidden');
     $('railBoard').classList.add('hidden');
     $('busBoard').classList.add('hidden');
     $('keyInput').focus();
+  }
+
+  async function showStationPanel(){
+    if(!apiKey){ showSetup(); return; }
+    setStatus('');
+    $('setup').classList.add('hidden');
+    $('stationPanel').classList.remove('hidden');
+    const sel = $('stationSelect');
+    sel.innerHTML = '<option value="">Auto-detect nearest</option><option value="" disabled>Loading stations…</option>';
+    try{
+      const stations = await fetchStations();
+      sel.innerHTML = '<option value="">Auto-detect nearest</option>' + stations.map(s=>
+        '<option value="'+esc(s.Code)+'">'+esc(s.Name)+'</option>'
+      ).join('');
+      if(pinnedStation) sel.value = pinnedStation.Code;
+    }catch(err){
+      sel.innerHTML = '<option value="">Auto-detect nearest</option>';
+      showError(err.message||String(err));
+    }
   }
 
   /* ---------- events ---------- */
@@ -371,12 +442,21 @@
   $('keyInput').addEventListener('keydown', e=>{ if(e.key==='Enter') $('saveKey').click(); });
   $('refreshBtn').addEventListener('click', ()=>{ pos=null; refresh(); });
   $('keyBtn').addEventListener('click', showSetup);
+  $('stationBtn').addEventListener('click', showStationPanel);
+  $('saveStation').addEventListener('click', async ()=>{
+    const code = $('stationSelect').value;
+    const station = allStations && allStations.find(s=>s.Code===code);
+    await savePinnedStation(station ? {Code:station.Code, Name:station.Name, Lat:station.Lat, Lon:station.Lon, together:station.StationTogether1||''} : null);
+    $('stationPanel').classList.add('hidden');
+    refresh();
+  });
   $('retryBtn').addEventListener('click', ()=>{ pos=null; refresh(); });
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && apiKey) refresh(); });
 
   /* ---------- boot ---------- */
   (async ()=>{
     await loadKey();
+    await loadPinnedStation();
     if(apiKey) refresh(); else showSetup();
   })();
 })();
