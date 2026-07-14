@@ -71,6 +71,14 @@
   }
   .board-head .name{font-weight:700;font-size:.95rem;letter-spacing:.05em;text-transform:uppercase}
   .board-head .walk{font-size:.72rem;color:var(--muted);white-space:nowrap}
+  .board-head .stop-select{
+    background:var(--board);border:none;color:var(--paper);
+    font-family:inherit;font-stretch:75%;font-weight:700;font-size:.95rem;
+    letter-spacing:.05em;text-transform:uppercase;
+    padding:0;min-width:0;flex:1;cursor:pointer;
+  }
+  .board-head .stop-select option{background:var(--board);color:var(--paper)}
+  .board-head .stop-select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
   .rows{padding:4px 8px}
   .row{
@@ -185,6 +193,7 @@
 <section class="board hidden" id="busBoard" aria-label="Bus arrivals">
   <div class="board-head">
     <div class="name" id="busName">—</div>
+    <select class="stop-select hidden" id="busStopSelect" aria-label="Choose bus stop"></select>
     <div class="walk" id="busWalk"></div>
   </div>
   <div class="rows" id="busRows"></div>
@@ -202,6 +211,8 @@
   let timer = null;
   let pinnedStation = null;  // {Code, Name, Lat, Lon, together}
   let allStations = null;    // cached jStations list, fetched on demand
+  let busStops = null;       // stops within 0.5 mi of pos, sorted by distance
+  let selectedStopID = null; // user-chosen stop from the dropdown; null = closest
 
   /* ---------- key persistence (Claude artifact storage, with fallback) ---------- */
   async function loadKey(){
@@ -305,9 +316,20 @@
     $('railBoard').classList.remove('hidden');
   }
 
-  function renderBus(name, walkM, preds){
-    $('busName').textContent = name;
-    $('busWalk').textContent = walkLabel(walkM);
+  function fillStopSelect(stops, currentID){
+    const sel = $('busStopSelect');
+    sel.innerHTML = stops.map(s=>
+      '<option value="'+esc(s.StopID)+'">'+esc(s.Name||'Bus stop')+' · '+(s._d/1609.34).toFixed(2)+' mi</option>'
+    ).join('');
+    sel.value = currentID;
+  }
+
+  function renderBus(bus){
+    const {name, dist, preds, stops, stopID} = bus;
+    fillStopSelect(stops, stopID);
+    $('busStopSelect').classList.remove('hidden');
+    $('busName').classList.add('hidden');
+    $('busWalk').textContent = walkLabel(dist);
     const rows = $('busRows');
     if(!preds.length){
       rows.innerHTML = '<div class="empty">No buses currently predicted at this stop.</div>';
@@ -358,24 +380,23 @@
     return {name, dist:e._d, trains};
   }
 
-  async function nearestBus(){
-    const d = await wmata('/Bus.svc/json/jStops', {Lat:pos.lat, Lon:pos.lon, Radius:800});
-    const stops = d.Stops||[];
-    if(!stops.length) return null;
+  async function fetchBusStops(){
+    if (busStops) return busStops;
+    // 0.5 mile radius (~805 m)
+    const d = await wmata('/Bus.svc/json/jStops', {Lat:pos.lat, Lon:pos.lon, Radius:805});
+    const stops = (d.Stops||[]).filter(s=>s.StopID && s.StopID!=='0');
     stops.forEach(s=>s._d = haversine(pos.lat,pos.lon,s.Lat,s.Lon));
     stops.sort((a,b)=>a._d-b._d);
-    // Closest stop can be quiet; check up to the 3 nearest for live predictions
-    for(let i=0;i<Math.min(3,stops.length);i++){
-      const s=stops[i];
-      if(!s.StopID || s.StopID==='0') continue;
-      const p = await wmata('/NextBusService.svc/json/jPredictions', {StopID:s.StopID});
-      const preds = p.Predictions||[];
-      if(preds.length || i===Math.min(3,stops.length)-1){
-        return {name: p.StopName||s.Name||'Bus stop', dist:s._d, preds};
-      }
-    }
-    const s=stops[0];
-    return {name:s.Name||'Bus stop', dist:s._d, preds:[]};
+    busStops = stops;
+    return busStops;
+  }
+
+  async function nearestBus(){
+    const stops = await fetchBusStops();
+    if(!stops.length) return null;
+    const s = (selectedStopID && stops.find(x=>x.StopID===selectedStopID)) || stops[0];
+    const p = await wmata('/NextBusService.svc/json/jPredictions', {StopID:s.StopID});
+    return {stopID:s.StopID, name:p.StopName||s.Name||'Bus stop', dist:s._d, preds:p.Predictions||[], stops};
   }
 
   async function refresh(){
@@ -383,13 +404,18 @@
     $('errPanel').classList.add('hidden');
     $('stationPanel').classList.add('hidden');
     try{
-      if(!pos){ setStatus('Finding you…'); pos = await getPosition(); }
+      if(!pos){ setStatus('Finding you…'); pos = await getPosition(); busStops = null; }
       setStatus('Loading arrivals…');
       const [rail, bus] = await Promise.all([nearestRail(), nearestBus()]);
       if(rail) renderRail(rail.name, rail.dist, rail.trains);
       else { $('railName').textContent='No station within 2.5 km'; $('railRows').innerHTML=''; $('railWalk').textContent=''; $('railBoard').classList.remove('hidden'); }
-      if(bus) renderBus(bus.name, bus.dist, bus.preds);
-      else { $('busName').textContent='No bus stop within 800 m'; $('busRows').innerHTML=''; $('busWalk').textContent=''; $('busBoard').classList.remove('hidden'); }
+      if(bus) renderBus(bus);
+      else {
+        $('busName').textContent='No bus stop within 0.5 mi';
+        $('busName').classList.remove('hidden');
+        $('busStopSelect').classList.add('hidden');
+        $('busRows').innerHTML=''; $('busWalk').textContent=''; $('busBoard').classList.remove('hidden');
+      }
       setStatus('Updated '+new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}));
       clearTimeout(timer); timer=setTimeout(refresh, 30000);
     }catch(err){
@@ -449,6 +475,15 @@
     await savePinnedStation(station ? {Code:station.Code, Name:station.Name, Lat:station.Lat, Lon:station.Lon, together:station.StationTogether1||''} : null);
     $('stationPanel').classList.add('hidden');
     refresh();
+  });
+  $('busStopSelect').addEventListener('change', async ()=>{
+    selectedStopID = $('busStopSelect').value || null;
+    try{
+      const bus = await nearestBus();
+      if(bus) renderBus(bus);
+    }catch(err){
+      showError(err.message||String(err));
+    }
   });
   $('retryBtn').addEventListener('click', ()=>{ pos=null; refresh(); });
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && apiKey) refresh(); });
